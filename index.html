@@ -449,13 +449,24 @@ lucide-react/dist/esm/lucide-react.js:
    трогает. Даёт три вещи из набора Telegram — вибро-отклик, главную
    кнопку внизу и кнопку «Назад» в шапке. Если этот блок целиком убрать,
    приложение работает ровно как раньше: все свои кнопки на месте.
-   Поэтому откат — это удаление одного этого <script>. */
+   Поэтому откат — это удаление одного этого <script>.
+
+   Важно: свою кнопку приложения прячем ТОЛЬКО если главная кнопка
+   Telegram реально показалась (её show() не выкинул ошибку). Если на
+   этом клиенте Telegram главной кнопки нет — ничего не прячем, и человек
+   пользуется обычными кнопками приложения. Так действие не может
+   пропасть с экрана. */
 (function () {
   function start(W) {
+    /* Что мост увидел — на случай разбора: открыть консоль или
+       посмотреть window.__ttMost. */
+    var diag = window.__ttMost = { tg: true, ver: '', main: false, back: false, haptic: false, started: true };
+    try { diag.ver = W.version || ''; } catch (e) {}
     try { W.ready(); } catch (e) {}
     try { W.expand(); } catch (e) {}
 
-    var H = W.HapticFeedback;
+    var H = null; try { H = W.HapticFeedback; } catch (e) {}
+    diag.haptic = !!H;
     function vibro(t) {
       try {
         if (!H) return;
@@ -473,16 +484,20 @@ lucide-react/dist/esm/lucide-react.js:
     /* 2) Вибро на всплывающую подсказку: успех — мягко, ошибка — иначе. */
     var ERR = /(не удал|не дош|нет связ|ошиб|не сохран|подожд|нельзя|не наш)/i;
     function toastNode(n) {
-      if (!n || n.nodeType !== 1) return null;
-      var st = n.getAttribute && n.getAttribute('style');
+      if (!n || n.nodeType !== 1 || !n.getAttribute) return null;
+      var st = n.getAttribute('style');
       if (st && st.indexOf('bottom: 86px') >= 0 && st.indexOf('position: absolute') >= 0) return n;
       return null;
     }
 
     var root = document.getElementById('root') || document.body;
 
-    var back = W.BackButton, main = W.MainButton;
-    var curBtn = null, lastText = '', lastProg = false;
+    var back = null, main = null;
+    try { back = W.BackButton; } catch (e) {}
+    try { main = W.MainButton; } catch (e) {}
+    diag.main = !!main; diag.back = !!back;
+
+    var curBtn = null, lastText = '';
 
     var PRIMARY = 'rgb(21, 99, 90)';   // #15635A — обычное действие
     var DANGER = ['rgb(192, 69, 59)', 'rgb(174, 63, 99)']; // #C0453B / берри — опасное
@@ -493,7 +508,6 @@ lucide-react/dist/esm/lucide-react.js:
       return r.width > 0 && r.height > 0;
     }
     function dismiss() {
-      /* Своя кнопка «Закрыть»/«Отмена» приложения — последняя видимая. */
       var list = root.querySelectorAll('button'), found = null;
       for (var i = 0; i < list.length; i++) {
         var t = (list[i].textContent || '').trim();
@@ -505,74 +519,90 @@ lucide-react/dist/esm/lucide-react.js:
       var res = [], list = root.querySelectorAll('button');
       for (var i = 0; i < list.length; i++) {
         var b = list[i];
-        if (b === curBtn) { res.push(b); continue; }   // наш спрятанный — всё равно считаем
+        if (b === curBtn) { res.push(b); continue; }
         if (b.disabled) continue;
         if (!vidno(b)) continue;
         var r = b.getBoundingClientRect();
         var txt0 = (b.textContent || '').trim();
-        if (r.width < 88 || r.height < 28 || txt0.length < 3) continue;   // мелкие «+»-иконки не трогаем
+        if (r.width < 88 || r.height < 28 || txt0.length < 3) continue;
         var c = bg(b);
         if (c === PRIMARY || DANGER.indexOf(c) >= 0) res.push(b);
       }
       return res;
     }
     function opasnaya(el) { return DANGER.indexOf(bg(el)) >= 0; }
+    function pokazat(el) { if (el) try { el.style.removeProperty('display'); } catch (e) {} }
+    function spryatat(el) { if (el) try { el.style.setProperty('display', 'none', 'important'); } catch (e) {} }
 
     function skan() {
-      /* Кнопка «Назад» — если у приложения открыт вложенный экран. */
-      try { if (back) { if (dismiss()) back.show(); else back.hide(); } } catch (e) {}
+      /* Кнопка «Назад» — если открыт вложенный экран. Показ и скрытие —
+         каждое в своей защите, чтобы одно не мешало другому. */
+      var d = dismiss();
+      if (back) { try { d ? back.show() : back.hide(); } catch (e) {} }
 
-      /* Прятать свою кнопку и показывать главную имеет смысл только
-         там, где главная кнопка Telegram есть. Нет её (обычный браузер,
-         старый клиент) — ничего не прячем: приложение со своими
-         кнопками работает как есть. */
-      if (!main) { if (curBtn) { try { curBtn.style.removeProperty('display'); } catch (e) {} curBtn = null; } return; }
+      /* Нет главной кнопки на этом клиенте — ничего не прячем. */
+      if (!main) { if (curBtn) { pokazat(curBtn); curBtn = null; } return; }
 
-      /* Главная кнопка — если на экране ровно одно крупное действие. */
       var k = kandidaty();
       var target = k.length === 1 ? k[0] : null;
-      if (target !== curBtn) {
-        if (curBtn) { try { curBtn.style.removeProperty('display'); } catch (e) {} curBtn = null; }
-        if (target) { curBtn = target; try { curBtn.style.setProperty('display', 'none', 'important'); } catch (e) {} }
-        lastText = ''; lastProg = null;
-      }
-      if (!curBtn) { try { main.hide(); } catch (e) {} return; }
 
-      var t = (curBtn.textContent || '').trim();
+      if (!target) { if (curBtn) { pokazat(curBtn); curBtn = null; } try { main.hide(); } catch (e) {} return; }
+
+      var t = (target.textContent || '').trim();
       if (t.length > 60) t = t.slice(0, 60);
-      var busy = curBtn.disabled || /…$/.test(t);
+      var busy = target.disabled || /…$/.test(t);
+
+      /* Сначала пробуем ПОКАЗАТЬ главную кнопку. Прячем свою только
+         если это удалось. */
+      var pokazana = false;
       try {
         if (t.toUpperCase() !== lastText) { main.setText(t.toUpperCase()); lastText = t.toUpperCase(); }
-        main.setParams ? main.setParams({ color: opasnaya(curBtn) ? '#C0453B' : '#15635A', text_color: '#ffffff' }) : 0;
-        if (busy !== lastProg) { busy ? main.showProgress && main.showProgress() : main.hideProgress && main.hideProgress(); lastProg = busy; }
-        main.show();
-      } catch (e) {}
+        try { main.show(); pokazana = true; } catch (e2) { pokazana = false; }
+        if (main.setParams) { try { main.setParams({ color: opasnaya(target) ? '#C0453B' : '#15635A', text_color: '#ffffff' }); } catch (e3) {} }
+        try { busy ? (main.showProgress && main.showProgress()) : (main.hideProgress && main.hideProgress()); } catch (e4) {}
+      } catch (e) { pokazana = false; }
+
+      if (pokazana) {
+        if (curBtn && curBtn !== target) pokazat(curBtn);
+        curBtn = target;
+        spryatat(curBtn);
+      } else {
+        /* Главная кнопка не показалась — оставляем свою кнопку как есть. */
+        if (curBtn) { pokazat(curBtn); curBtn = null; }
+        try { main.hide(); } catch (e) {}
+      }
     }
 
-    if (back && back.onClick) back.onClick(function () { var d = dismiss(); if (d) { vibro('light'); d.click(); } });
-    if (main && main.onClick) main.onClick(function () { if (curBtn && !curBtn.disabled) { vibro('medium'); curBtn.click(); } });
+    if (back && back.onClick) { try { back.onClick(function () { var x = dismiss(); if (x) { vibro('light'); x.click(); } }); } catch (e) {} }
+    if (main && main.onClick) { try { main.onClick(function () { if (curBtn && !curBtn.disabled) { vibro('medium'); curBtn.click(); } }); } catch (e) {} }
 
-    var t = null;
-    var mo = new MutationObserver(function (recs) {
-      for (var i = 0; i < recs.length; i++) {
-        var a = recs[i].addedNodes || [];
-        for (var j = 0; j < a.length; j++) {
-          var tn = toastNode(a[j]);
-          if (tn) vibro(ERR.test(tn.textContent || '') ? 'error' : 'success');
+    var tm = null;
+    try {
+      var mo = new MutationObserver(function (recs) {
+        for (var i = 0; i < recs.length; i++) {
+          var a = recs[i].addedNodes || [];
+          for (var j = 0; j < a.length; j++) {
+            var tn = toastNode(a[j]);
+            if (tn) vibro(ERR.test(tn.textContent || '') ? 'error' : 'success');
+          }
         }
-      }
-      clearTimeout(t); t = setTimeout(skan, 60);
-    });
-    mo.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'style'], characterData: true });
+        clearTimeout(tm); tm = setTimeout(skan, 60);
+      });
+      mo.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'style'], characterData: true });
+    } catch (e) {}
     skan();
+    /* Подстраховка: экран мог отрисоваться позже моста. */
+    var n = 0, iv = setInterval(function () { skan(); if (++n > 10) clearInterval(iv); }, 300);
+    try { console.log('[Толк-Talk] мост Telegram: версия', diag.ver, '| главная', diag.main, '| назад', diag.back, '| вибро', diag.haptic); } catch (e) {}
   }
 
-  /* telegram-web-app.js грузится асинхронно — ждём его немного. */
+  /* telegram-web-app.js грузится асинхронно — ждём его. */
   var tries = 0;
   (function wait() {
-    var W = window.Telegram && window.Telegram.WebApp;
-    if (W && W.initData !== undefined) { start(W); return; }
-    if (tries++ > 60) return;   // ~9 секунд; нет Telegram — просто ничего не делаем
+    var W = null;
+    try { W = window.Telegram && window.Telegram.WebApp; } catch (e) { W = null; }
+    if (W && (W.MainButton || W.BackButton || W.HapticFeedback)) { start(W); return; }
+    if (tries++ > 80) { try { window.__ttMost = { tg: false, started: false }; } catch (e) {} return; }
     setTimeout(wait, 150);
   })();
 })();
