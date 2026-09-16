@@ -657,7 +657,10 @@ lucide-react/dist/esm/lucide-react.js:
   (function wait() {
     var W = null;
     try { W = window.Telegram && window.Telegram.WebApp; } catch (e) { W = null; }
-    if (W && (W.MainButton || W.BackButton || W.HapticFeedback)) { start(W); return; }
+    var etoMax = false;
+      try { etoMax = !!(window.WebApp && (window.WebApp.initData || window.WebApp.initDataUnsafe)); } catch (e) {}
+      if (etoMax) { try { window.__ttMost = { tg: false, started: false, prichina: 'открыто из MAX' }; } catch (e) {} return; }
+      if (W && (W.MainButton || W.BackButton || W.HapticFeedback)) { start(W); return; }
     if (tries++ > 80) { try { window.__ttMost = { tg: false, started: false }; } catch (e) {} return; }
     setTimeout(wait, 150);
   })();
